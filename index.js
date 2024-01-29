@@ -1,16 +1,17 @@
 const express = require('express');
 const mongoose = require('mongoose');
+const dotenv = require('dotenv');
+dotenv.config();
 const app = express();
 
-const url = "mongodb://127.0.0.1:27017/Bedss";
-mongoose.connect(url );
+const mongoUrl = process.env.MONGO_URL;
+
+mongoose.connect(mongoUrl);
 
 const con = mongoose.connection;
 con.on('open', () => {
   console.log("db is connected");
 });
-
-
 
 app.use(express.json());
 
@@ -18,6 +19,6 @@ app.use(express.json());
 const alienrouter = require('./router/Beds');
 app.use('/', alienrouter);
 
-app.listen(9000, () => {
-  console.log('Server is running on port 9000'); // Confirm that the server is running
+app.listen(process.env.PORT || 9000, () => {
+  console.log('Server is running'); // Confirm that the server is running
 });
