@@ -102,7 +102,6 @@ router.get('/aff', async (req, res) => {
   }
 });
 
-//admit patient:
 const generateRandomString = (length) => {
   const characters = 'ABCDEF1234';
   let result = '';
@@ -129,13 +128,35 @@ function calculateRiskScore(medicalAcuity) {
   }
 }
 
+async function calculateInfectionRate() {
+  try {
+    const totalAdmittedPatients = await Patient.countDocuments({});
+    const infectedPatients = await Patient.countDocuments({ infectionStatus: 'infected' });
+    
+    if (totalAdmittedPatients === 0) {
+      //return 0;
+      return "0%";
+
+    }
+
+    //return (infectedPatients / totalAdmittedPatients) * 100;
+    const rate = (infectedPatients / totalAdmittedPatients) * 100;
+
+    return rate.toFixed(2) + "%"; // Limiting to two decimal places and adding '%' sign
+
+  } catch (error) {
+    console.error('Failed to calculate infection rate', error);
+    throw error;
+  }
+}
+
 // POST endpoint to admit a patient with risk score calculation
 router.post('/admitpt', async (req, res) => {
   try {
     const {
       patientName, age, gender, contactno, wardId, wardName, bedNumber, medicalAcuity,
       admittingDoctors, admissionDate, admissionTime, assignedNurse, tasks,
-      address, abhaNo,
+      address, abhaNo, infectionStatus
     } = req.body;
 
     // Automatically generate a unique patient ID
@@ -156,59 +177,64 @@ router.post('/admitpt', async (req, res) => {
     // Calculate risk score based on medical acuity
     const riskScore = calculateRiskScore(medicalAcuity);
 
-    // Create a new Patient document with riskScore
+    // Create a new Patient document with riskScore and infectionStatus
     const newPatient = new Patient({
       patientName, age, gender, contactno, wardId, patientId, wardName, bedNumber,
       medicalAcuity, admittingDoctors, admissionDate, admissionTime,
-      assignedNurse, abhaNo, address, tasks, riskScore,
+      assignedNurse, abhaNo, address, tasks, riskScore, infectionStatus
     });
-//Constructs a new Patient object with all the required information, including the risk score.
-//Checks ward and bed existence: Verifies if the specified ward and bed exist in the database using Bed.findOne().
-//Checks bed availability: Ensures the bed is not already occupied
+
     // Check if the specified ward and bed exist
     const bed = await Bed.findOne({
       'wards.wardId': wardId,
       'wards.beds.bedNumber': bedNumber
     });
-//Queries the database to find the specified ward and bed.
 
     if (!bed) {
       return res.status(400).json({ error: 'Ward or bed does not exist.' });
     }
 
-    // Check if the bed is available orChecks if the specified ward and bed exist.
-
+    // Check if the bed is available
     const selectedBed = bed.wards.find(wardItem => wardItem.wardId === wardId).beds.find(bedItem => bedItem.bedNumber === bedNumber);
-    //Finds the selected bed within the specified ward.
-
     if (selectedBed.status === 'occupied') {
       return res.status(400).json({ error: 'Selected bed is already occupied.' });
     }
 
-    // Save the patient or Persists the new patient document to the database using newPatient.save().
- 
-        const savedPatient = await newPatient.save();
+    // Save the patient
+    const savedPatient = await newPatient.save();
 
     // Mark the bed as occupied in the bed collection
     selectedBed.status = 'occupied';
     selectedBed.patientId = patientId;
-    selectedBed.patientName=patientName;
-    selectedBed.age=age;
-    selectedBed.gender=gender;
-    selectedBed.contactno=contactno;
-    selectedBed.medicalAcuity=medicalAcuity;
+    selectedBed.patientName = patientName;
+    selectedBed.age = age;
+    selectedBed.gender = gender;
+    selectedBed.contactno = contactno;
+    selectedBed.medicalAcuity = medicalAcuity;
 
     // Save changes to the bed data
     await bed.save();
 
-    res.status(201).json(savedPatient);
+    // Calculate infection rate
+    const infectionRate = await calculateInfectionRate();
+
+    res.status(201).json({ patient: savedPatient, infectionRate });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-
+// GET endpoint to calculate infection rate
+router.get('/infectionrate', async (req, res) => {
+  try {
+    const infectionRate = await calculateInfectionRate();
+    res.json({ infectionRate });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 ////transfer+ID:
 
@@ -369,8 +395,10 @@ router.post('/distaa', async (req, res) => {
       const {
         patientId,
         patientName,
-        medicalAcuity,age,
-        gender,admissionDate,
+        medicalAcuity,
+        age,
+        gender,
+        admissionDate,
         wardId,
         bedNumber,
         dischargeReasons,
@@ -436,7 +464,9 @@ router.post('/distaa', async (req, res) => {
         const discharged = new Discharged({
           dischargeId,
           patientName,age,
-          gender,medicalAcuity,admissionDate,
+          gender,
+          medicalAcuity,
+          admissionDate,
           wardId,
           bedNumber,
           dischargeReasons,
@@ -538,9 +568,84 @@ router.get('/Disget',async(req,res)=>{
 
 
 
+//dashboardnew1:
+// Route to check available time for beds in a specific ward
+router.get('/bedAvailabilityBoard', async (req, res) => {
+    
+  try {
+    // Fetch bed availability data from the database
+    const bedAvailabilityData = await Bed.find();
 
+    // Format the data for the heatmap representation
+    const formattedData = formatBedAvailabilityData(bedAvailabilityData);
 
-// DASHBOARD_4
+    res.status(200).json(formattedData);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to retrieve bed availability data' });
+  }
+});
+
+// Helper function to format bed availability data for the heatmap
+function formatBedAvailabilityData(bedAvailabilityData) {
+  const formattedData = {
+    bedAvailability: [],
+  };
+
+  // Iterate through each ward and time slot in the data
+  bedAvailabilityData.forEach((ward) => {
+    ward.wards.forEach((timeSlot) => {
+      // Create a new entry in the formatted data
+      const entry = {
+        ward: timeSlot.wardName,
+        time: getRandomTime(), // Use a random time for each time slot
+        availableBeds: 0, // Default to 0 if no beds are available
+      };
+
+      // Calculate the total available beds for the time slot
+      timeSlot.beds.forEach((bed) => {
+        if (bed.status === 'available') {
+          entry.availableBeds += 1;
+        }
+      });
+
+      // Adjust admission time if a person gets admitted
+      if (entry.availableBeds > 0) {
+        entry.time = adjustAdmissionTime(entry.time);
+      }
+
+      // Add the entry to the formatted data
+      formattedData.bedAvailability.push(entry);
+    });
+  });
+
+  return formattedData;
+}
+
+// Helper function to get a random time within the specified range (8 am to 11 pm)
+function getRandomTime() {
+  const randomHour = Math.floor(Math.random() * (15 - 8 + 1)) + 8; // Random hour between 8 and 11
+  const randomMinute = Math.floor(Math.random() * 60);
+  return moment().hour(randomHour).minute(randomMinute).format('HH:mm A');
+}
+
+// Helper function to adjust admission time within the specified range (8 am to 11 pm)
+function adjustAdmissionTime(currentTime) {
+  // Reduce the admission time by a random number of minutes
+  const randomMinutes = Math.floor(Math.random() * 60);
+  const adjustedTime = moment(currentTime, 'HH:mm A').subtract(randomMinutes, 'minutes');
+
+  // Ensure the adjusted time is within the specified range (8 am to 11 pm)
+  if (adjustedTime.isBefore(moment('08:00 AM', 'hh:mm A'))) {
+    return moment('08:00 AM', 'hh:mm A').format('HH:mm A');
+  } else if (adjustedTime.isAfter(moment('11:00 PM', 'hh:mm A'))) {
+    return moment('11:00 PM', 'hh:mm A').format('HH:mm A');
+  }
+
+  return adjustedTime.format('HH:mm A');
+}
+
+// DASHBOARD 4
 router.get('/paaaG', async (req, res) => {
 
   try {
@@ -579,7 +684,7 @@ router.get('/paaaG', async (req, res) => {
   }
   });
   
-  //dashboarf7:
+  //dashboard 7:
   
   
   
@@ -610,7 +715,7 @@ router.get('/paaaG', async (req, res) => {
   });
   
   
-  //Dashboard12:
+  //Dashboard 12:
   
   router.get('/pace', async (req, res) => {
     try {
@@ -639,7 +744,25 @@ router.get('/paaaG', async (req, res) => {
       res.status(500).json({ error: 'Internal server error' });
     }
   });
-//Dashboard3:
+  //Dasboard 6:
+  router.get('/patientCareDashboard', async (req, res) => {
+    try {
+      const patientsData = await Patient.find();
+      const formattedData = patientsData.map(patient => ({
+        name: patient.patientName,
+        medicalAcuity: patient.medicalAcuity,
+        assignedNurse: patient.assignedNurse,
+        tasks: patient.tasks,
+      }));
+  
+      res.status(200).json({ patients: formattedData });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Failed to retrieve patient care dashboard data' });
+    }
+  });
+  
+//Dashboard 3:
   router.get('/availablebeddds', async (req, res) => {
     try {
       const availableWards = await Bed.find({ 'wards.beds.status': 'available' });
@@ -665,7 +788,7 @@ router.get('/paaaG', async (req, res) => {
       res.status(500).json({ error: 'Internal server error' });
     }
   });
-//dashboard2
+//dashboard 2
   router.get('/wardoccupancys', async (req, res) => {
     try {
       const occupiedWards = await Bed.find({ 'wards.beds.status': 'occupied' });
@@ -695,7 +818,6 @@ router.get('/paaaG', async (req, res) => {
 
 //8.turnaroundTime:
 
-// Define a GET route for calculating bed turnaround time
 router.get('/bedturnaroundtime', async (req, res) => {
   try {
     // Initialize an array to store bed turnaround time information
@@ -720,26 +842,22 @@ router.get('/bedturnaroundtime', async (req, res) => {
       // Check if there is a corresponding admission record
       if (admissionPatient) {
         // Calculate turnaround time in minutes between discharge and admission
-        const dischargeDateTime = moment(`${dischargedPatients.dischargeDate} ${dischargedPatients.dischargeTime}`, 'DD-MM-YYYY hh:mm A');
-        const admissionDateTime = moment(`${admissionPatient.admissionDate} ${admissionPatient.admissionTime}`, 'DD-MM-YYYY hh:mm A');
-        const turnaroundTime = admissionDateTime.diff(dischargeDateTime, 'minutes',);
-
-        console.log(turnaroundTime);
+        const dischargeDateTime = moment(`${dischargeDate} ${dischargeTime}`, 'YYYY-MM-DD hh:mm A');
+        const admissionDateTime = moment(`${admissionPatient.admissionDate} ${admissionPatient.admissionTime}`, 'YYYY-MM-DD hh:mm A');
+        const turnaroundTime = admissionDateTime.diff(dischargeDateTime, 'minutes');
 
         // Format the date as "YYYY-MM-DD"
-        const formattedDate = moment(dischargeDate, 'DD-MM-YYYY').format('YYYY-MM-DD');
+        const formattedDate = moment(dischargeDate, 'YYYY-MM-DD').format('YYYY-MM-DD');
 
         // Find the ward name based on wardId
         const bed = await Bed.findOne({ 'wards.wardId': wardId, 'wards.beds.bedNumber': bedNumber });
         const wardName = bed ? bed.wards.find(ward => ward.wardId == wardId).wardName : null;
-        
-        console.log(wardName);
 
         // Push the bed turnaround time information to the array
         bedTurnaroundTime.push({
           ward: wardName,
           date: formattedDate,
-          turnaroundTime,
+          turnaroundTime: turnaroundTime,
         });
       }
     }
@@ -753,8 +871,6 @@ router.get('/bedturnaroundtime', async (req, res) => {
   }
 });
 
-
-  
 //5.Dashboard 5
 // Define a GET route to fetch admissions and discharges trend data
 router.get('/admission-discharge', async (req, res) => {
@@ -810,54 +926,106 @@ function formatDate(dateString) {
   }
   return dateString; // Return unchanged if not in the expected format
 }
+//Dashboard 6:
+router.get('/patientCareDashboard', async (req, res) => {
+  try {
+    const patientsData = await Patient.find();
+    const formattedData = patientsData.map(patient => ({
+      name: patient.patientName,
+      medicalAcuity: patient.medicalAcuity,
+      assignedNurse: patient.assignedNurse,
+      tasks: patient.tasks,
+    }));
 
+    res.status(200).json({ patients: formattedData });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to retrieve patient care dashboard data' });
+  }
+});
 
-//Dashboard10
+//Dashboard 10
+router.get('/patientflow', async (req, res) => {
+  try {
+    const patientFlow = [];
 
+    // Find all transfer records
+    const transferRecords = await Transfer.find();
 
-  router.get('/patientflow', async (req, res) => {
-    try {
-      const patientFlow = [];
-  
-      // Find all transfer records
-      const transferRecords = await Transfer.find();
-  
-      // Create a map to store patient flow counts
-      const patientFlowMap = {};
-  
-      // Iterate through transfer records and count the flows from currentdept to transferdept
-      for (const transfer of transferRecords) {
-        const { currentWardId, transferWardId } = transfer;
-        console.log(`currentWardId: ${currentWardId}, transferWardId: ${transferWardId}`);
-  
-        // Create a unique key for each patient flow
-        const flowKey = `${currentWardId} to ${transferWardId}`;
+    // Create a map to store patient flow counts
+    const patientFlowMap = {};
 
-        console.log(flowKey); //Ex:Ward A1 to Ward B1
+    // Iterate through transfer records and count the flows from currentWardId to transferWardId
+    for (const transfer of transferRecords) {
+      const { currentWardId, transferWardId } = transfer;
+      console.log(`currentWardId: ${currentWardId}, transferWardId: ${transferWardId}`);
 
-  
-        // Increment the count for the flow in the map
-        patientFlowMap[flowKey] = (patientFlowMap[flowKey] || 0) + 1;
-      }
+      // Create a unique key for each patient flow
+      const flowKey = `${currentWardId} to ${transferWardId}`;
 
-      //console.log(patientFlowMap); //Ex{'Ward A1 to Ward B1': 1}
-  
-      // Convert the map to the desired output format
-      for (const key in patientFlowMap) {
-        const [from, to] = key.split(' to ');
-        const value = patientFlowMap[key];
-  
-        patientFlow.push({ from, to, value });
-      }
-  
-      res.json({ patientFlow });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: 'Internal server error' });
+      // Increment the count for the flow in the map
+      patientFlowMap[flowKey] = (patientFlowMap[flowKey] || 0) + 1;
     }
-  });
 
-module.exports = router;
+    // Convert the map to the desired output format with ward names
+    for (const key in patientFlowMap) {
+      const [from, to] = key.split(' to ');
+      const value = patientFlowMap[key];
+
+      patientFlow.push({ from, to, value });
+    }
+
+    res.json({ patientFlow });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+  // router.get('/patientflow', async (req, res) => {
+  //   try {
+  //     const patientFlow = [];
+  
+  //     // Find all transfer records
+  //     const transferRecords = await Transfer.find();
+  
+  //     // Create a map to store patient flow counts
+  //     const patientFlowMap = {};
+  
+  //     // Iterate through transfer records and count the flows from currentdept to transferdept
+  //     for (const transfer of transferRecords) {
+  //       const { currentWardId, transferWardId } = transfer;
+  //       console.log(`currentWardId: ${currentWardId}, transferWardId: ${transferWardId}`);
+  
+  //       // Create a unique key for each patient flow
+  //       const flowKey = `${currentWardId} to ${transferWardId}`;
+
+  //       console.log(flowKey); //Ex:Ward A1 to Ward B1
+
+  
+  //       // Increment the count for the flow in the map
+  //       patientFlowMap[flowKey] = (patientFlowMap[flowKey] || 0) + 1;
+  //     }
+
+  //     //console.log(patientFlowMap); //Ex{'Ward A1 to Ward B1': 1}
+  
+  //     // Convert the map to the desired output format
+  //     for (const key in patientFlowMap) {
+  //       const [from, to] = key.split(' to ');
+  //       const value = patientFlowMap[key];
+  
+  //       patientFlow.push({ from, to, value });
+  //     }
+  
+  //     res.json({ patientFlow });
+  //   } catch (error) {
+  //     console.error(error);
+  //     res.status(500).json({ error: 'Internal server error' });
+  //   }
+  // });
+
+
    
 
 //waitinglist:
@@ -1068,4 +1236,47 @@ router.delete('/deletept/:patientId', async (req, res) => {
   }
 });
 
+//Dashboard 9
+// Function to calculate infection rate
+async function calculateInfectionRate() {
+  try {
+    const totalAdmittedPatients = await Patient.countDocuments();
+    const infectedPatients = await Patient.countDocuments({ infectionStatus: 'infected' });
+    if (totalAdmittedPatients === 0) {
+      return 0;
+    }
+    return (infectedPatients / totalAdmittedPatients) * 100;
+  } catch (error) {
+    console.error('Failed to calculate infection rate', error);
+    throw error;
+  }
+}
+router.get('/:wardId/statistics', async (req, res) => {
+  try {
+    const { wardId } = req.params;
+
+    // Find the bed within the ward
+    const bedData = await Bed.findOne({ 'wards.wardId': wardId });
+
+    if (!bedData) {
+      return res.status(404).json({ error: 'Ward not found.' });
+    }
+
+    // Calculate infection rate
+    const totalAdmittedPatients = await Patient.countDocuments();
+    const infectedPatients = await Patient.countDocuments({ infectionStatus: 'infected' });
+    const infectionRate = totalAdmittedPatients === 0 ? 0 : (infectedPatients / totalAdmittedPatients) * 100;
+
+    // Calculate mortality rate
+    const totalBedsInWard = bedData.wards.reduce((total, ward) => total + ward.beds.length, 0);
+    const dischargedRecords = await Discharged.find({ wardId, 'dischargeReasons': 'died' });
+    const totalDiedCases = dischargedRecords.length;
+    const mortalityRate = (totalDiedCases / totalBedsInWard) * 100;
+
+    res.json({ wardId, infectionRate, mortalityRate });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Error retrieving statistics for the ward.' });
+  }
+});
 module.exports = router
