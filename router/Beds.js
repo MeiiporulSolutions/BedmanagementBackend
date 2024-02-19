@@ -684,6 +684,71 @@ router.get('/paaaG', async (req, res) => {
   }
   });
   
+//dash:11:
+router.get('/patient', async (req, res) => {
+  try {
+    // Calculate readmission rate
+    const readmissionRateData = await Patient.aggregate([
+      {
+        $group: {
+          _id: '$contactno',
+          totalAdmissions: { $sum: 1 },
+          totalReadmissions: { $sum: { $cond: [{ $ne: ['$admissionDate', '$dischargeDate'] }, 1, 0] } }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          readmissionRate: { $cond: [{ $eq: ['$totalAdmissions', 0] }, 0, { $divide: ['$totalReadmissions', '$totalAdmissions'] }] }
+        }
+      }
+    ]);
+
+    // Calculate the total readmission rate
+    const totalReadmissionRate = readmissionRateData.reduce((total, record) => {
+      return total + record.readmissionRate;
+    }, 0);
+
+    // Calculate infection rate
+    const totalAdmittedPatients = await Patient.countDocuments();
+    const infectedPatients = await Patient.countDocuments({ infectionStatus: 'infected' });
+    const infectionRate = (totalAdmittedPatients === 0) ? 0 : (infectedPatients / totalAdmittedPatients) * 100;
+
+    // Calculate avgLengthOfStay
+    const patients = await Patient.find();
+    const avgLengthOfStay = patients.reduce((total, patient) => {
+      if (patient.admissionDate && patient.dischargeDate) {
+        const admissionDate = new Date(patient.admissionDate);
+        const dischargeDate = new Date(patient.dischargeDate);
+        const lengthOfStay = (dischargeDate - admissionDate) / (1000 * 60 * 60 * 24); // Convert milliseconds to days
+        return total + lengthOfStay;
+      }
+      return total;
+    }, 0) / patients.length;
+
+    // Get the date from the first patient in the collection
+    const firstPatient = patients[0];
+    const date = firstPatient ? firstPatient.admissionDate : null;
+
+    // Create the desired output object
+    const output = {
+      patientOutcomeMetrics: [
+        {
+          date: date,
+          mortalityRate: 0.03, // Example value, you can calculate this based on your data
+          readmissionRate: totalReadmissionRate,
+          avgLengthOfStay: avgLengthOfStay
+        }
+      ]
+    };
+
+    res.json(output);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
   //dashboard 7:
   
   
