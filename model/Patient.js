@@ -22,6 +22,7 @@ const patientSchema = new mongoose.Schema({
     type: String,
     require: true
   }],
+  riskScore:String,
   admittingDoctors: [{
     type: String,
   }],
