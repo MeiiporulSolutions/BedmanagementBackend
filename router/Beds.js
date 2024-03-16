@@ -646,7 +646,7 @@ function adjustAdmissionTime(currentTime) {
 }
 
 // DASHBOARD 4
-router.get('/paaaG', async (req, res) => {
+router.get('/paaG', async (req, res) => {
 
   try {
     // Use aggregate to get unique combinations of wardName and medicalAcuity with count
@@ -752,7 +752,6 @@ router.get('/patient', async (req, res) => {
   //dashboard 7:
   
   
-  
   router.get('/patientriskget', async (req, res) => {
     try {
       // Find all patients in the database
@@ -778,6 +777,35 @@ router.get('/patient', async (req, res) => {
       res.status(500).json({ error: 'Internal server error' });
     }
   });
+  
+  
+  
+  
+  // router.get('/patientriskget', async (req, res) => {
+  //   try {
+  //     // Find all patients in the database
+  //     const patients = await Patient.find();
+  
+  //     // Extract patient data
+  //     const patientData = patients.map((patient) => ({
+  //       patientName: patient.patientName,
+       
+        
+       
+  //       medicalAcuity: patient.medicalAcuity,
+        
+        
+  //       riskScore: patient.riskScore
+  //     }));
+  
+    
+  //     // Send back the patient data
+  //     res.status(200).json(patientData);
+  //   } catch (error) {
+  //     console.error(error);
+  //     res.status(500).json({ error: 'Internal server error' });
+  //   }
+  // });
   
   
   //Dashboard 12:
@@ -1206,7 +1234,7 @@ router.put('/pro',async(req,res)=>{
       res.status(500).json({ error: 'Internal server error' });
     }
   });
-
+//landing page:
 router.get('/Admit',async(req,res)=>{
   try{
    const Admit = await Patient.find({},'-_id')
@@ -1344,4 +1372,103 @@ router.get('/:wardId/statistics', async (req, res) => {
     res.status(500).json({ error: 'Error retrieving statistics for the ward.' });
   }
 });
+//Wait Get
+router.get('/Waiting',async(req,res,next)=>{
+  try{
+   const wait = await Waiting.find({},'-_id WaitlistEntryfields.patientName WaitlistEntryfields.patientId WaitlistEntryfields.age WaitlistEntryfields.gender WaitlistEntryfields.priority WaitlistEntryfields.admittingDoctors WaitlistEntryfields.admissionDate')
+   
+   if(!wait){
+    res.status(404).json({message:"Patient Not Found"})
+   }
+  
+res.status(201).json(wait)
+  
+  }
+
+  catch(err){
+    next(err)
+ }
+})
+
+router.put('/assignbedss', async (req, res) => {
+  try {
+    const { bedNumber, patientId } = req.body;
+
+    if (!patientId) {
+      return res.status(400).json({ error: 'PatientId is required in the request body.' });
+    }
+
+    // Find the patient in the Waitinglist collection
+    const waitingPatient = await Waiting.findOne({ 'WaitlistEntryfields.patientId': patientId });
+
+    if (!waitingPatient) {
+      return res.status(404).json({ error: 'Patient not found in the waiting list.' });
+    }
+
+    // Remove the patient from the waiting list
+
+    // Update the bedNumber in the Patient collection
+    await Patient.updateOne({ patientId }, { $set: { bedNumber } });
+
+    // Update or create the corresponding record in the Bed collection
+    let existingBed = await Bed.findOne({ 'wards.beds.bedNumber': bedNumber });
+
+    if (existingBed) {
+      // Update existing record
+      existingBed.wards.forEach((ward) => {
+        const bedToUpdate = ward.beds.find((bed) => bed.bedNumber === bedNumber);
+        if (bedToUpdate) {
+          bedToUpdate.status = 'occupied';
+          bedToUpdate.assignedPatientId = patientId;
+        }
+      });
+
+      // Save the changes to the existingBed
+      await existingBed.save();
+    } else {
+      // Create new record
+      const newBed = new Bed({
+        wards: [{
+          wardName: waitingPatient.WaitlistEntryfields.wardName,
+          beds: [{
+            bedNumber,
+            status: 'occupied',
+            assignedPatientId: patientId,
+            
+          }]
+        }]
+      });
+
+      // Save the newBed
+      await newBed.save();
+    }
+
+    res.json({ message: 'Bed assigned successfully.' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});router.delete('/deletewait/:patientId', async (req, res) => {
+  try {
+    const { patientId } = req.params;
+
+    // Find the patient in the Waitinglist collection
+    const waitingPatient = await Waiting.findOne({ 'WaitlistEntryfields.patientId': patientId });
+
+    if (!waitingPatient) {
+      return res.status(404).json({ error: 'Patient not found in the waiting list.' });
+    }
+
+    // Delete the patient from the Waitinglist collection
+    await Waiting.deleteOne({ 'WaitlistEntryfields.patientId': patientId });
+
+    // Delete the patient from the Patient collection
+    await Patient.deleteOne({ patientId });
+
+    res.status(200).json({ message: 'Patient deleted successfully.' });
+  } catch (err) {
+    next(err)
+  }
+})
+
 module.exports = router
