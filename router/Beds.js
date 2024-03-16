@@ -751,62 +751,33 @@ router.get('/patient', async (req, res) => {
 
   //dashboard 7:
   
-  
-  router.get('/patientriskget', async (req, res) => {
-    try {
+ // GET endpoint to retrieve patient data including patientName, medicalAcuity, and riskScore
+ router.get('/patientriskget', async (req, res) => {
+  try {
       // Find all patients in the database
       const patients = await Patient.find();
-  
-      // Extract patient data
-      const patientData = patients.map((patient) => ({
-        patientName: patient.patientName,
-       
-        
-       
-        medicalAcuity: patient.medicalAcuity,
-        
-        
-        riskScore: patient.riskScore
-      }));
-  
-    
+
+      // Extract patient data including patientName, medicalAcuity, and riskScore
+      const patientData = patients.map((patient) => {
+          // Extract medicalAcuity from the array if it's an array, otherwise use it directly
+          const acuity = Array.isArray(patient.medicalAcuity) ? patient.medicalAcuity[0] : patient.medicalAcuity;
+          // Calculate riskScore based on medicalAcuity
+          const riskScore = calculateRiskScore(acuity);
+
+          return {
+              patientName: patient.patientName,
+              medicalAcuity: acuity,
+              riskScore: riskScore,
+          };
+      });
+
       // Send back the patient data
       res.status(200).json(patientData);
-    } catch (error) {
+  } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Internal server error' });
-    }
-  });
-  
-  
-  
-  
-  // router.get('/patientriskget', async (req, res) => {
-  //   try {
-  //     // Find all patients in the database
-  //     const patients = await Patient.find();
-  
-  //     // Extract patient data
-  //     const patientData = patients.map((patient) => ({
-  //       patientName: patient.patientName,
-       
-        
-       
-  //       medicalAcuity: patient.medicalAcuity,
-        
-        
-  //       riskScore: patient.riskScore
-  //     }));
-  
-    
-  //     // Send back the patient data
-  //     res.status(200).json(patientData);
-  //   } catch (error) {
-  //     console.error(error);
-  //     res.status(500).json({ error: 'Internal server error' });
-  //   }
-  // });
-  
+  }
+});
   
   //Dashboard 12:
   
